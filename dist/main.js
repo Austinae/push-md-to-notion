@@ -43523,27 +43523,39 @@ var NotionApi = class {
     });
   }
   async updatePageTitle(pageId, title) {
-    await this.client.pages.update({
-      page_id: pageId,
-      properties: {
-        title: {
-          type: "title",
-          title: [
-            {
-              type: "text",
-              text: { content: title }
-            }
-          ]
+    console.log(`[updatePageTitle] Updating page ${pageId} with title: "${title}"`);
+    try {
+      await this.client.pages.update({
+        page_id: pageId,
+        properties: {
+          title: {
+            type: "title",
+            title: [
+              {
+                type: "text",
+                text: { content: title }
+              }
+            ]
+          }
         }
-      }
-    });
+      });
+      console.log(`[updatePageTitle] Successfully updated page title`);
+    } catch (error) {
+      console.error(`[updatePageTitle] Failed to update page title:`, error);
+      throw error;
+    }
   }
   async clearBlockChildren(blockId) {
+    console.log(`[clearBlockChildren] Starting to clear children for blockId: ${blockId}`);
+    let deletedCount = 0;
     for await (const block of this.listChildBlocks(blockId)) {
+      console.log(`[clearBlockChildren] Deleting block ${block.id} (type: ${"type" in block ? block.type : "unknown"})`);
       await this.client.blocks.delete({
         block_id: block.id
       });
+      deletedCount++;
     }
+    console.log(`[clearBlockChildren] Completed - deleted ${deletedCount} blocks`);
   }
   /**
    * Convert markdown to the notion block data format and append it to an existing block.
@@ -43551,15 +43563,36 @@ var NotionApi = class {
    * @param md Markdown as string.
    */
   async appendMarkdown(blockId, md, preamble = []) {
-    const allBlocks = [...preamble, ...(0, import_martian.markdownToBlocks)(md)];
+    console.log(`[appendMarkdown] Starting with blockId: ${blockId}`);
+    console.log(`[appendMarkdown] Preamble blocks count: ${preamble.length}`);
+    console.log(`[appendMarkdown] Markdown length: ${md.length} characters`);
+    const markdownBlocks = (0, import_martian.markdownToBlocks)(md);
+    console.log(`[appendMarkdown] Markdown converted to ${markdownBlocks.length} blocks`);
+    const allBlocks = [...preamble, ...markdownBlocks];
+    console.log(`[appendMarkdown] Total blocks to append: ${allBlocks.length}`);
     const batchSize = 100;
+    console.log(`[appendMarkdown] Batch size: ${batchSize}`);
     for (let i = 0; i < allBlocks.length; i += batchSize) {
       const batch = allBlocks.slice(i, i + batchSize);
-      await this.client.blocks.children.append({
-        block_id: blockId,
-        children: batch
-      });
+      const batchNumber = Math.floor(i / batchSize) + 1;
+      const totalBatches = Math.ceil(allBlocks.length / batchSize);
+      console.log(`[appendMarkdown] Processing batch ${batchNumber}/${totalBatches} with ${batch.length} blocks (blocks ${i + 1}-${Math.min(i + batchSize, allBlocks.length)})`);
+      if (batchNumber === 1) {
+        console.log(`[appendMarkdown] First batch block types:`, batch.slice(0, 3).map((b) => ({ type: b.type, hasContent: !!b[b.type] })));
+      }
+      try {
+        await this.client.blocks.children.append({
+          block_id: blockId,
+          children: batch
+        });
+        console.log(`[appendMarkdown] Successfully appended batch ${batchNumber}/${totalBatches}`);
+      } catch (error) {
+        console.error(`[appendMarkdown] Failed to append batch ${batchNumber}/${totalBatches}:`, error);
+        console.error(`[appendMarkdown] Batch content (first 2 blocks):`, JSON.stringify(batch.slice(0, 2), null, 2));
+        throw error;
+      }
     }
+    console.log(`[appendMarkdown] Completed successfully - appended ${allBlocks.length} blocks in ${Math.ceil(allBlocks.length / batchSize)} batches`);
   }
   /**
    * Iterate over all of the childeren of a given block. This manages the underlying paginated API.
@@ -43641,26 +43674,37 @@ async function retry(fn, opts = {}) {
 
 // src/pushMarkdown.ts
 async function pushUpdatedMarkdownFiles() {
+  console.log("[pushUpdatedMarkdownFiles] Starting to process changed markdown files");
   const markdownFiles = getChangedMdFiles();
+  console.log(`[pushUpdatedMarkdownFiles] Found ${markdownFiles.length} changed markdown files:`, markdownFiles);
   const fileFailures = [];
   for (const mdFileName of markdownFiles) {
+    console.log(`[pushUpdatedMarkdownFiles] Processing file: ${mdFileName}`);
     const res = await retry(() => pushMarkdownFile(mdFileName), {
       tries: 2
     });
     if (res instanceof RetryError) {
       console.log("Failed to push markdown file", res);
       fileFailures.push({ file: mdFileName, message: res.message });
+    } else {
+      console.log(`[pushUpdatedMarkdownFiles] Successfully processed file: ${mdFileName}`);
     }
   }
+  console.log(`[pushUpdatedMarkdownFiles] Completed processing. Failures: ${fileFailures.length}`);
   if (fileFailures.length) {
+    console.error(`[pushUpdatedMarkdownFiles] Files failed to push:`, fileFailures);
     core.setFailed(`Files failed to push: ${fileFailures}`);
   }
 }
 async function pushMarkdownFile(mdFilePath) {
+  console.log(`[pushMarkdownFile] Starting to process file: ${mdFilePath}`);
   const { notion } = getCtx();
   const fileContents = await import_promises2.default.readFile(mdFilePath, { encoding: "utf-8" });
   const fileMatter = (0, import_gray_matter.default)(fileContents);
+  console.log(`[pushMarkdownFile] File size: ${fileContents.length} characters`);
+  console.log(`[pushMarkdownFile] Content length (after frontmatter): ${fileMatter.content.length} characters`);
   if (!isNotionFrontmatter(fileMatter.data)) {
+    console.log(`[pushMarkdownFile] No Notion frontmatter found, skipping file`);
     return;
   }
   console.log("Notion frontmatter found", {
@@ -43669,6 +43713,7 @@ async function pushMarkdownFile(mdFilePath) {
   });
   const pageData = fileMatter.data;
   const pageId = pageData.notion_page.startsWith("http") ? import_node_path.default.basename(new URL(pageData.notion_page).pathname).split("-").at(-1) : pageData.notion_page;
+  console.log(`[pushMarkdownFile] Extracted pageId: ${pageId}`);
   if (!pageId) {
     throw new Error("Could not get page ID from frontmatter");
   }
@@ -43679,16 +43724,42 @@ async function pushMarkdownFile(mdFilePath) {
   console.log("Clearing page content");
   await notion.clearBlockChildren(pageId);
   console.log("Adding markdown content");
-  await notion.appendMarkdown(pageId, fileMatter.content, [
-    createWarningBlock(mdFilePath)
-  ]);
+  const warningBlock = createWarningBlock(mdFilePath);
+  console.log(`[pushMarkdownFile] Created warning block:`, warningBlock);
+  await notion.appendMarkdown(pageId, fileMatter.content, [warningBlock]);
+  console.log(`[pushMarkdownFile] Successfully completed processing file: ${mdFilePath}`);
 }
 function createWarningBlock(fileName) {
+  const repoUrl = github.context.payload.repository?.html_url;
+  const sha = github.context.sha;
+  console.log(`[createWarningBlock] Repository URL: ${repoUrl}`);
+  console.log(`[createWarningBlock] SHA: ${sha}`);
+  console.log(`[createWarningBlock] File name: ${fileName}`);
+  const constructedUrl = `${repoUrl}/blob/${sha}/${fileName}`;
+  console.log(`[createWarningBlock] Constructed URL: ${constructedUrl}`);
+  try {
+    new URL(constructedUrl);
+    console.log(`[createWarningBlock] URL is valid`);
+  } catch (error) {
+    console.error(`[createWarningBlock] Invalid URL constructed: ${constructedUrl}`, error);
+    return {
+      type: "callout",
+      callout: {
+        rich_text: (0, import_martian2.markdownToRichText)(
+          `This file is linked to Github. Changes must be made in the markdown file to be permanent.`
+        ),
+        icon: {
+          emoji: "\u26A0"
+        },
+        color: "yellow_background"
+      }
+    };
+  }
   return {
     type: "callout",
     callout: {
       rich_text: (0, import_martian2.markdownToRichText)(
-        `This file is linked to Github. Changes must be made in the [markdown file](${github.context.payload.repository?.html_url}/blob/${github.context.sha}/${fileName}) to be permanent.`
+        `This file is linked to Github. Changes must be made in the [markdown file](${constructedUrl}) to be permanent.`
       ),
       icon: {
         emoji: "\u26A0"
@@ -43701,11 +43772,17 @@ function createWarningBlock(fileName) {
 // src/main.ts
 async function main() {
   try {
+    console.log("[main] Starting GitHub Action");
     const token = core2.getInput("notion-token");
+    console.log(`[main] Notion token provided: ${token ? "Yes" : "No"}`);
     github2.context.repo.repo;
     const notion = new NotionApi(token);
+    console.log("[main] NotionApi client created");
+    console.log("[main] Starting to push updated markdown files");
     await actionStore.run({ notion }, pushUpdatedMarkdownFiles);
+    console.log("[main] Successfully completed pushing markdown files");
   } catch (e) {
+    console.error("[main] Error occurred:", e);
     core2.setFailed(e instanceof Error ? e.message : "Unknown reason");
   }
 }
