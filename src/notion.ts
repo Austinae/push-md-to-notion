@@ -84,6 +84,11 @@ export class NotionApi {
       
       console.log(`[appendMarkdown] Processing batch ${batchNumber}/${totalBatches} with ${batch.length} blocks (blocks ${i + 1}-${Math.min(i + batchSize, allBlocks.length)})`);
       
+      // Log the first few blocks in the batch to help debug URL issues
+      if (batchNumber === 1) {
+        console.log(`[appendMarkdown] First batch block types:`, batch.slice(0, 3).map(b => ({ type: b.type, hasContent: !!b[b.type as keyof typeof b] })));
+      }
+      
       try {
         await this.client.blocks.children.append({
           block_id: blockId,
@@ -92,6 +97,7 @@ export class NotionApi {
         console.log(`[appendMarkdown] Successfully appended batch ${batchNumber}/${totalBatches}`);
       } catch (error) {
         console.error(`[appendMarkdown] Failed to append batch ${batchNumber}/${totalBatches}:`, error);
+        console.error(`[appendMarkdown] Batch content (first 2 blocks):`, JSON.stringify(batch.slice(0, 2), null, 2));
         throw error;
       }
     }
