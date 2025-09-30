@@ -92,11 +92,42 @@ export async function pushMarkdownFile(mdFilePath: string) {
 }
 
 function createWarningBlock(fileName: string): BlockObjectRequest {
+  const repoUrl = github.context.payload.repository?.html_url;
+  const sha = github.context.sha;
+  
+  console.log(`[createWarningBlock] Repository URL: ${repoUrl}`);
+  console.log(`[createWarningBlock] SHA: ${sha}`);
+  console.log(`[createWarningBlock] File name: ${fileName}`);
+  
+  const constructedUrl = `${repoUrl}/blob/${sha}/${fileName}`;
+  console.log(`[createWarningBlock] Constructed URL: ${constructedUrl}`);
+  
+  // Validate URL before using it
+  try {
+    new URL(constructedUrl);
+    console.log(`[createWarningBlock] URL is valid`);
+  } catch (error) {
+    console.error(`[createWarningBlock] Invalid URL constructed: ${constructedUrl}`, error);
+    // Fallback to a simple message without the link
+    return {
+      type: 'callout',
+      callout: {
+        rich_text: markdownToRichText(
+          `This file is linked to Github. Changes must be made in the markdown file to be permanent.`
+        ),
+        icon: {
+          emoji: '⚠',
+        },
+        color: 'yellow_background',
+      },
+    };
+  }
+  
   return {
     type: 'callout',
     callout: {
       rich_text: markdownToRichText(
-        `This file is linked to Github. Changes must be made in the [markdown file](${github.context.payload.repository?.html_url}/blob/${github.context.sha}/${fileName}) to be permanent.`
+        `This file is linked to Github. Changes must be made in the [markdown file](${constructedUrl}) to be permanent.`
       ),
       icon: {
         emoji: '⚠',
