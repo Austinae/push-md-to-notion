@@ -14,28 +14,43 @@ export class NotionApi {
   }
 
   public async updatePageTitle(pageId: string, title: string) {
-    await this.client.pages.update({
-      page_id: pageId,
-      properties: {
-        title: {
-          type: 'title',
-          title: [
-            {
-              type: 'text',
-              text: { content: title },
-            },
-          ],
+    console.log(`[updatePageTitle] Updating page ${pageId} with title: "${title}"`);
+    
+    try {
+      await this.client.pages.update({
+        page_id: pageId,
+        properties: {
+          title: {
+            type: 'title',
+            title: [
+              {
+                type: 'text',
+                text: { content: title },
+              },
+            ],
+          },
         },
-      },
-    });
+      });
+      console.log(`[updatePageTitle] Successfully updated page title`);
+    } catch (error) {
+      console.error(`[updatePageTitle] Failed to update page title:`, error);
+      throw error;
+    }
   }
 
   public async clearBlockChildren(blockId: string) {
+    console.log(`[clearBlockChildren] Starting to clear children for blockId: ${blockId}`);
+    let deletedCount = 0;
+    
     for await (const block of this.listChildBlocks(blockId)) {
+      console.log(`[clearBlockChildren] Deleting block ${block.id} (type: ${'type' in block ? block.type : 'unknown'})`);
       await this.client.blocks.delete({
         block_id: block.id,
       });
+      deletedCount++;
     }
+    
+    console.log(`[clearBlockChildren] Completed - deleted ${deletedCount} blocks`);
   }
 
   /**
@@ -48,17 +63,40 @@ export class NotionApi {
     md: string,
     preamble: BlockObjectRequest[] = []
   ) {
-    const allBlocks = [...preamble, ...markdownToBlocks(md) as BlockObjectRequest[]];
+    console.log(`[appendMarkdown] Starting with blockId: ${blockId}`);
+    console.log(`[appendMarkdown] Preamble blocks count: ${preamble.length}`);
+    console.log(`[appendMarkdown] Markdown length: ${md.length} characters`);
+    
+    const markdownBlocks = markdownToBlocks(md) as BlockObjectRequest[];
+    console.log(`[appendMarkdown] Markdown converted to ${markdownBlocks.length} blocks`);
+    
+    const allBlocks = [...preamble, ...markdownBlocks];
+    console.log(`[appendMarkdown] Total blocks to append: ${allBlocks.length}`);
+    
     const batchSize = 100;
+    console.log(`[appendMarkdown] Batch size: ${batchSize}`);
     
     // Process blocks in batches of 100 to respect Notion's API limit
     for (let i = 0; i < allBlocks.length; i += batchSize) {
       const batch = allBlocks.slice(i, i + batchSize);
-      await this.client.blocks.children.append({
-        block_id: blockId,
-        children: batch,
-      });
+      const batchNumber = Math.floor(i / batchSize) + 1;
+      const totalBatches = Math.ceil(allBlocks.length / batchSize);
+      
+      console.log(`[appendMarkdown] Processing batch ${batchNumber}/${totalBatches} with ${batch.length} blocks (blocks ${i + 1}-${Math.min(i + batchSize, allBlocks.length)})`);
+      
+      try {
+        await this.client.blocks.children.append({
+          block_id: blockId,
+          children: batch,
+        });
+        console.log(`[appendMarkdown] Successfully appended batch ${batchNumber}/${totalBatches}`);
+      } catch (error) {
+        console.error(`[appendMarkdown] Failed to append batch ${batchNumber}/${totalBatches}:`, error);
+        throw error;
+      }
     }
+    
+    console.log(`[appendMarkdown] Completed successfully - appended ${allBlocks.length} blocks in ${Math.ceil(allBlocks.length / batchSize)} batches`);
   }
 
   /**
